@@ -17,6 +17,7 @@ const float THIRD_BASE_TIME = 9.0f;
 int score = 0;
 int strikes = 0;
 int balls = 0;
+int fouls = 0;
 int outs = 0;
 
 float batterProgress = 0.0f;
@@ -73,11 +74,12 @@ struct Ball
             vy -= 9.8f * d;
             if (y <= 0) {
                 y = 0;
-                if (groundBall){
+                if (groundBall) {
                     vy = 0;
                     vx *= 0.985f;
                     vz *= 0.985f;
-                } else {
+                }
+                else {
                     vy = -vy * 0.25f;
                     vx *= 0.9f;
                     vz *= 0.9f;
@@ -132,12 +134,12 @@ Fielder firstMan = { 10,12, 10,12, 12,4 };
 Fielder secondMan = { 6,18, 6,18, 14, 4 };
 Fielder shortStop = { -6,18, -6,18, 14,4 };
 Fielder thirdMan = { -10,12, -10,12, 12,4 };
-Fielder leftField = { -18,40, -18,40, 28,4.5f };
-Fielder center = { 0,48, 0,48, 30,4.5f };
-Fielder rightField = { 18,40, 18,40, 28,4.5f };
+Fielder leftField = { -18,40, -18,40, 22,4.0f };
+Fielder center = { 0,48, 0,48, 24,4.2f };
+Fielder rightField = { 18,40, 18,40, 22,4.0f };
 
-void scoreRun() { 
-    score++; 
+void scoreRun() {
+    score++;
 }
 
 void resetFielders()
@@ -210,7 +212,8 @@ void advanceRunners(int bases)
         {
             scoreRun();
             runners.erase(runners.begin() + i);
-        } else i++;
+        }
+        else i++;
     }
     if (bases < 4)
     {
@@ -245,6 +248,25 @@ float nearestOutfielderDistance(float x, float z) {
     return best;
 }
 
+
+Fielder* nearestOutfielder(float x, float z)
+{
+    Fielder* fs[] = { &leftField, &center, &rightField };
+    Fielder* best = fs[0];
+    float bestD = distance2D(x, z, fs[0]->x, fs[0]->z);
+
+    for (int i = 1; i < 3; i++)
+    {
+        float d = distance2D(x, z, fs[i]->x, fs[i]->z);
+        if (d < bestD)
+        {
+            bestD = d;
+            best = fs[i];
+        }
+    }
+    return best;
+}
+
 bool runnerOnFirst()
 {
     for (auto& r : runners)
@@ -263,7 +285,7 @@ bool checkHit()
 
     return sqrt(dx * dx + dy * dy + dz * dz) < 1.5f;
 
-} 
+}
 
 void updateFielder(Fielder& f)
 {
@@ -282,21 +304,21 @@ void updateFielder(Fielder& f)
 
     if (isOutfielder)
     {
-        bool shouldMove = false;
+        bool shouldMove = (nearestOutfielder(landX, landZ) == &f);
 
         if (&f == &leftField)
         {
-            if (landX < -5)
+            if (landX < -7)
                 shouldMove = true;
         }
         else if (&f == &center)
         {
-            if (landX >= -15 && landX <= 15)
+            if (landX >= -12 && landX <= 12)
                 shouldMove = true;
         }
         else if (&f == &rightField)
         {
-            if (landX > 5)
+            if (landX > 7)
                 shouldMove = true;
         }
 
@@ -403,7 +425,7 @@ void processDoublePlay()
         outs += 2;
 
         for (int i = 0; i < (int)runners.size(); i++) {
-            if (runners[i].base == 1){
+            if (runners[i].base == 1) {
                 runners.erase(runners.begin() + i);
                 break;
             }
@@ -453,9 +475,9 @@ bool checkHomeRun()
 {
     float dist = sqrt(ball.x * ball.x + ball.z * ball.z);
 
-    if (dist >= FENCE_RADIUS && ball.y > 1.0f) return true; 
+    if (dist >= FENCE_RADIUS && ball.y > 1.0f) return true;
     return false;
-} 
+}
 
 void processHitResult() {
     float hitDist = sqrt(landX * landX + landZ * landZ);
@@ -487,6 +509,7 @@ void processStrike()
     {
         strikes = 0;
         balls = 0;
+        fouls = 0;
         outs++;
         // 3 아웃 → 게임 종료
         if (outs >= 3)
@@ -494,6 +517,14 @@ void processStrike()
             state = GAMEOVER;
         }
     }
+}
+
+
+void processFoul()
+{
+    fouls++;
+    if (strikes < 2)
+        strikes++;
 }
 
 void processBall()
@@ -505,6 +536,7 @@ void processBall()
         advanceRunners(1);
         balls = 0;
         strikes = 0;
+        fouls = 0;
     }
 }
 
@@ -575,7 +607,7 @@ void update()
         swingAngle += 400 * dt;
 
         if (checkHit()) state = HIT;
-        else if (ball.z < -2) 
+        else if (ball.z < -2)
         {
             if (swing) processStrike();
             else processBall();
@@ -650,6 +682,8 @@ void update()
 
         groundBall = (angle < 15);
 
+
+
         if (groundBall)
         {
             ball.vy *= 0.05f;
@@ -664,6 +698,15 @@ void update()
         landX = ball.x + ball.vx * t + landingNoise(eng);
         landZ = ball.z + ball.vz * t + landingNoise(eng);
 
+        // 낙하지점 기준 파울 판정
+        if (landZ > 0.0f && fabs(landX) > landZ)
+        {
+            processFoul();
+            resetBall();
+            state = PITCHING;
+            break;
+        }
+
         state = FOLLOW;
         break;
     }
@@ -671,6 +714,28 @@ void update()
     case FOLLOW:
     {
         runnerTime += dt;
+
+
+        if (!groundBall)
+        {
+            Fielder* fs[] = { &leftField,&center,&rightField,&firstMan,&secondMan,&shortStop,&thirdMan };
+
+            for (int i = 0; i < 7; i++)
+            {
+                if (catchBall(*fs[i]))
+                {
+                    outs++;
+                    if (outs >= 3) state = GAMEOVER;
+                    else
+                    {
+                        resetBall();
+                        state = PITCHING;
+                    }
+                    glutPostRedisplay();
+                    return;
+                }
+            }
+        }
 
         if (anyFielderCatch())
         {
@@ -691,11 +756,30 @@ void update()
             else if (ballOwner == &thirdMan)
                 throwTime = 0.9f;
             else
-                throwTime = 1.6f;
+            {
+                float throwDist =
+                    distance2D(
+                        ballOwner->x,
+                        ballOwner->z,
+                        13.0f,
+                        13.0f);
 
-            float totalTime = runnerTime + throwTime;
+                // 외야 거리 비례 송구시간
+                throwTime = throwDist / 12.0f;
+            }
 
-            if (totalTime < FIRST_BASE_TIME)
+            float totalTime =
+                runnerTime +
+                fieldingDelay +
+                throwTime;
+
+            // 외야수는 거의 항상 세이프가 되도록 보정
+            bool outfieldPlay =
+                (ballOwner == &leftField ||
+                    ballOwner == &center ||
+                    ballOwner == &rightField);
+
+            if (!outfieldPlay && totalTime < FIRST_BASE_TIME)
             {
                 if (infield &&
                     groundBall &&
@@ -849,9 +933,9 @@ void setCamera()
 {
     if (state == FOLLOW)
         gluLookAt(ball.x + 5, ball.y + 6, ball.z - 15, ball.x, ball.y, ball.z, 0, 1, 0);
-    
+
     else gluLookAt(0, 12, -25, 0, 2, 15, 0, 1, 0);
-    
+
 }
 
 void init()
@@ -930,15 +1014,15 @@ void drawBatter()
         if (swingAngle < 25) swingScale = 1.05f;
         else if (swingAngle < 60) swingScale = 1.25f;
         else swingScale = 0.95f;
-        
+
     }
     glTranslatef(0, 0.7f, 0);
 
     if (state == SWING && swingAngle > 20 && swingAngle < 60)
         glColor3f(0.9f, 0.7f, 0.2f);
-    
+
     else glColor3f(0.6f, 0.3f, 0.1f);
-    
+
     glScalef(0.12f * swingScale, 2.2f * swingScale, 0.12f * swingScale);
     glutSolidCube(1);
     glPopMatrix();
@@ -978,13 +1062,13 @@ void drawBall()
     glPopMatrix();
 }
 
-void drawText(float x, float y, const std::string& s) 
+void drawText(float x, float y, const std::string& s)
 {
     glRasterPos2f(x, y);
 
     for (size_t i = 0; i < s.size(); i++)
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, s[i]);
-    
+
 }
 
 void display()
@@ -1011,6 +1095,7 @@ void display()
     drawText(20, 560, "Score : " + std::to_string(score));
     drawText(20, 530, "Strike : " + std::to_string(strikes));
     drawText(20, 500, "Out : " + std::to_string(outs));
+    drawText(20, 470, "Foul : " + std::to_string(fouls));
 
     int b1 = 0;
     int b2 = 0;
@@ -1023,12 +1108,12 @@ void display()
         if (runners[i].base == 3) b3++;
     }
 
-    drawText(20, 470, "1B : " + std::to_string(b1));
-    drawText(20, 440, "2B : " + std::to_string(b2));
-    drawText(20, 410, "3B : " + std::to_string(b3));
+    drawText(20, 440, "1B : " + std::to_string(b1));
+    drawText(20, 410, "2B : " + std::to_string(b2));
+    drawText(20, 380, "3B : " + std::to_string(b3));
 
     if (homeRun)drawText(320, 300, "HOME RUN!");
-    if (state == GAMEOVER) 
+    if (state == GAMEOVER)
         drawText(250, 260, "GAME OVER (R TO RESTART)");
 
     glMatrixMode(GL_PROJECTION);
@@ -1037,7 +1122,7 @@ void display()
     glutSwapBuffers();
 }
 
-void keyboard(unsigned char key, int, int) 
+void keyboard(unsigned char key, int, int)
 {
     if (key == ' ' && state == PITCHING) swing = true;
     if (key == 'r' || key == 'R') resetGame();
